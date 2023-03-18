@@ -3,6 +3,7 @@ using FinanceAPI.Models;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace FinanceAPI.Controllers
 {
@@ -26,7 +27,7 @@ namespace FinanceAPI.Controllers
             return salt;
         }
 
-        private byte[] GenerateHash(string password, byte[] salt)
+        private string GenerateHash(string password, byte[] salt)
         {
             using (var sha256 = SHA256.Create())
             {
@@ -35,15 +36,20 @@ namespace FinanceAPI.Controllers
                 Buffer.BlockCopy(passwordBytes, 0, passwordWithSalt, 0, passwordBytes.Length);
                 Buffer.BlockCopy(salt, 0, passwordWithSalt, passwordBytes.Length, salt.Length);
                 byte[] hash = sha256.ComputeHash(passwordWithSalt);
-                return hash;
+                return Convert.ToBase64String(hash);
             }
         }
-
         private List<UserDto> GetAllUsers()
         {
-            _connection.Open();
+            if (_connection.State != System.Data.ConnectionState.Open)
+            {
+                _connection.Open();
+            }
             var users = _connection.Query<UserDto>("SELECT * FROM user").ToList();
-            _connection.Close();
+            if (_connection.State != System.Data.ConnectionState.Closed)
+            {
+                _connection.Close();
+            }
             return users;
         }
 
@@ -61,38 +67,64 @@ namespace FinanceAPI.Controllers
 
                 if (users.FirstOrDefault(e => e.username == user.username) != null)
                 {
-                    return new Message { status = "failed", message = "email already registered" };
+                    return new Message { status = "failed", message = "username already taken" };
                 }
                 // TODO logic for sending email
 
                 byte[] salt = GenerateSalt();
-                string hash = Convert.ToBase64String(GenerateHash(user.password, salt));
-                _connection.Query($"INSERT INTO user (username, password, email) VALUES ({user.username}, {hash}, {user.email})");
+                string hash = GenerateHash(user.password, salt);
+                _connection.Query("INSERT INTO user (username, password, email, salt) VALUES (@username, @hash, @email, @salt)", new { username = user.username, hash = hash, email = user.email, salt = salt });
                 return new Message { status = "success", message = "user registered" };
             });
             return Ok(status);
         }
 
-        [HttpGet("login")]
-        public async Task<ActionResult<Message>> Login(UserDto user)
+        [HttpGet("login/{username}/{password}")]
+        public async Task<ActionResult<Message>> Login(string username, string password)
         {
             _connection.Open();
             var status = await Task.Run(() =>
             {
-                var users = GetAllUsers();
-                if (users.FirstOrDefault(e => e.email == user.email) != null)
+                List<User> user =  _connection.Query<User>($"SELECT * FROM user WHERE username = @username", new { username = username }).ToList();
+                if (user.Count > 0)
                 {
-                    return new Message { status = "failed", message = "email already registered" };
+                    byte[] salt = user[0].salt;
+                    string hash1 = user[0].password;
+                    string hash2 = GenerateHash(password, salt);
+                    if (hash1 == hash2)
+                    {
+                        HttpContext.Session.SetString("username", username);
+                        return new Message { status = "success", message = "user logged in" };
+                    }
+                    else
+                    {
+                        return new Message { status = "failed", message = "wrong password" };
+                    }
+                } else
+                {
+                    return new Message { status = "failed", message = "user doesn't exist" };
                 }
 
-                if (users.FirstOrDefault(e => e.username == user.username) != null)
-                {
-                    return new Message { status = "failed", message = "email already registered" };
-                }
-                // TODO logic for sending email
-                return new Message { status = "success", message = "user registered" };
             });
             return Ok(status);
+        }
+
+        [HttpGet("currentUser")]
+        public async Task<ActionResult<Message>> GetLoggedUser()
+        {
+            var status = await Task.Run(() =>
+            {
+                var username = HttpContext.Session.GetString("username");
+                if (username == null)
+                {
+                    return new Message { status = "failed", message = "no user is logged in at this time" };
+                }
+                else
+                {
+                    return new Message { status = "success", message = username };
+                }
+            });
+            return status;
         }
     }
 }
