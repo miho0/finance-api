@@ -94,6 +94,7 @@ namespace FinanceAPI.Controllers
                     if (hash1 == hash2)
                     {
                         HttpContext.Session.SetString("username", username);
+                        HttpContext.Session.SetString("ID", user[0].ID.ToString());
                         return new Message { status = "success", message = "user logged in" };
                     }
                     else
@@ -124,7 +125,27 @@ namespace FinanceAPI.Controllers
                     return new Message { status = "success", message = username };
                 }
             });
-            return status;
+            return Ok(status);
+        }
+
+        [HttpGet("Logout")]
+        public async Task<ActionResult<Message>> Logout()
+        {
+            var status = await Task.Run(() =>
+            {
+                var username = HttpContext.Session.GetString("username");
+                if (username == null)
+                {
+                    return new Message { status = "failed", message = "no user is logged in at this time" };
+                }
+                else
+                {
+                    HttpContext.Session.Remove("username");
+                    HttpContext.Session.Remove("ID");
+                    return new Message { status = "success", message = "user logged out" };
+                }
+            });
+            return Ok(status);
         }
     }
 }

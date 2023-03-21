@@ -31,9 +31,19 @@ namespace FinanceAPI.Controllers
             var categories = await Task.Run(() =>
             {
                 _connection.Open();
-                var categories = _connection.Query<CategoryDto>("SELECT * FROM category").ToList();
-                _connection.Close();
-                return categories;
+                string? userId = HttpContext.Session.GetString("ID");
+
+                if (userId != null)
+                {
+                    int id = int.Parse(userId);
+                    var categories = _connection.Query<CategoryDto>("SELECT * FROM category WHERE ID = @id", new {id = id}).ToList();
+                    _connection.Close();
+                    return categories;
+                } else
+                {
+                    _connection.Close();
+                    return new List<CategoryDto>();
+                }
             });
 
             return Ok(categories);
@@ -45,36 +55,45 @@ namespace FinanceAPI.Controllers
             var categoriesExtra = await Task.Run(() =>
             {
                 _connection.Open();
-                var categories = _connection.Query<Category>("SELECT * FROM category").ToList();
-                var dbEntries = _connection.Query<Entry>("SELECT * FROM entry").ToList();
-                var entries = new List<EntryDto>();
-                foreach (var entry in dbEntries)
+                string? userId = HttpContext.Session.GetString("ID");
+                if (userId != null)
                 {
-                    entries.Add(new EntryDto { category = _dbHelper.getCategoryName(entry.category_ID), name = entry.name, amount = entry.amount });
-                }
-                List<CategoryExtraDto> categoriesExtra = new List<CategoryExtraDto>();
-                foreach (Category category in categories)
-                {
-                    categoriesExtra.Add(new CategoryExtraDto { name = category.name, numTransactions = 0, percentage = 0, total = 0 });
-                }
-                double total = 0;
-                foreach (EntryDto entry in entries)
-                {
-                    total += entry.amount;
-                    CategoryExtraDto catEx = categoriesExtra.FirstOrDefault(e => e.name == entry.category);
-                    if (catEx != null)
+                    int id = int.Parse(userId);
+                    var categories = _connection.Query<Category>("SELECT * FROM category WHERE userid = @id", new {id = id}).ToList();
+                    var dbEntries = _connection.Query<Entry>("SELECT * FROM entry").ToList();
+                    var entries = new List<EntryDto>();
+                    foreach (var entry in dbEntries)
                     {
-                        catEx.total += entry.amount;
-                        catEx.numTransactions++;
+                        entries.Add(new EntryDto { category = _dbHelper.getCategoryName(entry.category_ID), name = entry.name, amount = entry.amount });
                     }
+                    List<CategoryExtraDto> categoriesExtra = new List<CategoryExtraDto>();
+                    foreach (Category category in categories)
+                    {
+                        categoriesExtra.Add(new CategoryExtraDto { name = category.name, numTransactions = 0, percentage = 0, total = 0 });
+                    }
+                    double total = 0;
+                    foreach (EntryDto entry in entries)
+                    {
+                        total += entry.amount;
+                        CategoryExtraDto catEx = categoriesExtra.FirstOrDefault(e => e.name == entry.category);
+                        if (catEx != null)
+                        {
+                            catEx.total += entry.amount;
+                            catEx.numTransactions++;
+                        }
+                    }
+
+                    foreach (CategoryExtraDto catEx in categoriesExtra)
+                    {
+                        catEx.percentage = Math.Round((double)(catEx.total / total) * 100);
+                    }
+                    _connection.Close();
+                    return categoriesExtra;
+                } else
+                {
+                    return new List<CategoryExtraDto>();
                 }
 
-                foreach (CategoryExtraDto catEx in categoriesExtra)
-                {
-                    catEx.percentage = Math.Round((double)(catEx.total / total) * 100);
-                }
-                _connection.Close();
-                return categoriesExtra;
             });
             return Ok(categoriesExtra);
         }
@@ -133,18 +152,60 @@ namespace FinanceAPI.Controllers
             return Ok(category);
         }
 
-        [HttpPost("Insert")]
-        public async Task<ActionResult> InsertCategory(CategoryDto categoryDto)
+        [HttpGet("GetByName/{name}")]
+        public async Task<ActionResult<CategoryDto>> GetCategoryByName(string name)
         {
-            await Task.Run(() =>
+            var category = await Task.Run(() =>
             {
                 _connection.Open();
-                string sqlQuery = "INSERT INTO category (name, priority) VALUES (@name, @priority)";
-                _connection.Execute(sqlQuery, categoryDto);
-                _connection.Close();
+                string? userId = HttpContext.Session.GetString("ID");
+                if (userId != null)
+                {
+                    var category = _connection.Query<CategoryDto>("SELECT * FROM category where userid = @userid and name = @name", new { userid = userId, name = name}).SingleOrDefault();
+                    _connection.Close();
+                    return category;
+                } else
+                {
+                    return null;
+                }
             });
 
-            return Ok();
+            if (category == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(category);
+        }
+
+        [HttpPost("Insert")]
+        public async Task<ActionResult<Message>> InsertCategory(CategoryDto categoryDto)
+        {
+            var response = await Task.Run(() =>
+            {
+            _connection.Open();
+            string? userId = HttpContext.Session.GetString("ID");
+                if (userId != null)
+                {
+                    int id = int.Parse(userId);
+                    var category = _connection.Query<Category>("SELECT * FROM category WHERE userid = @id and name = @name", new {id = id, name = categoryDto.name}).ToList();
+                    if (category.Count() > 0)
+                    {
+                        _connection.Close();
+                        return new Message { status = "failed", message = $"you already have a category named {categoryDto.name}" };
+                    }
+                    _connection.Query("INSERT INTO category (userid, name, priority) VALUES (@userId, @name, @priority)", new {userId = id, name = categoryDto.name, priority = categoryDto.priority});
+                    _connection.Close();
+                    return new Message { status = "success", message = "category added successfully." };
+                } else
+                {
+                    _connection.Close();
+                    return new Message { status = "failed", message = "you are not logged in" };
+
+                }
+            });
+
+            return Ok(response);
         }
 
         [HttpPatch("Update/{id}")]
@@ -161,18 +222,27 @@ namespace FinanceAPI.Controllers
             return Ok();
         }
 
-        [HttpDelete("Delete/{id}")]
-        public async Task<ActionResult> DeleteCategory(int id)
+        [HttpDelete("Delete/{name}")]
+        public async Task<ActionResult<Message>> DeleteCategory(string name)
         {
-            await Task.Run(() =>
+            var status = await Task.Run(() =>
             {
-                _connection.Open();
-                string sqlQuery = $"DELETE FROM category WHERE ID = {id}";
-                _connection.Execute(sqlQuery);
-                _connection.Close();
+                string? userId = HttpContext.Session.GetString("ID");
+                if (userId != null)
+                {
+                    int id = int.Parse(userId);
+                    _connection.Query("DELETE FROM category WHERE name = @name and userid = @id", new { name = name, id = id });
+                    _connection.Close();
+                    return new Message { status = "success", message = "deleted succcessfully" };
+                }
+                else
+                {
+                    _connection.Close();
+                    return new Message { status = "failed", message = "you are not logged in" };
+                }
             });
 
-            return Ok();
+            return Ok(status);
         }
 
     }
