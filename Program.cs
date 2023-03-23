@@ -12,9 +12,9 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddTransient<MySqlConnection>(_ => new MySqlConnection("Server=localhost;Port=3306;database=finance_db;User ID=root;Password=Avtizem123"));
-builder.Services.AddSingleton<DbHelper>(_ => new DbHelper(new MySqlConnection("Server=localhost;Port=3306;database=finance_db;User ID=root;Password=Avtizem123")));
+builder.Services.AddSingleton<DbHelper>(_ => new DbHelper(new MySqlConnection("Server=localhost;Port=3306;database=finance_db;User ID=root;Password=Avtizem123"), new TimeHelper()));
 builder.Services.AddSingleton<TimeHelper>(_ => new TimeHelper());
-builder.Services.AddSingleton<FilterHelper>(_ => new FilterHelper(new TimeHelper(), new DbHelper(new MySqlConnection("Server=localhost;Port=3306;database=finance_db;User ID=root;Password=Avtizem123"))));
+builder.Services.AddSingleton<FilterHelper>(_ => new FilterHelper(new TimeHelper(), new DbHelper(new MySqlConnection("Server=localhost;Port=3306;database=finance_db;User ID=root;Password=Avtizem123"), new TimeHelper())));
 
 builder.Services.AddCors(options =>
 {

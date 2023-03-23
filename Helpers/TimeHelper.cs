@@ -40,6 +40,10 @@ namespace FinanceAPI.Helpers
         {
             return (DateTime.Compare(fromJs(start), entry.time) <= 0 && DateTime.Compare(fromJs(end), entry.time) >= 0);
         }
+        public bool isDateInReadable(string start, string end, Entry entry)
+        {
+            return (DateTime.Compare(fromReadable(start), entry.time) <= 0 && DateTime.Compare(fromReadable(end), entry.time) >= 0);
+        }
 
         public string GenerateMonthRepresentation(DateTime date)
         {
